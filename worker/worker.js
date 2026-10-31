@@ -60,16 +60,36 @@ export default {
         const mime = /^image\/(jpeg|png|webp)$/.test(im?.mime) ? im.mime : "image/jpeg";
         if (typeof im?.data === "string" && im.data.length > 100) parts.push({ inline_data: { mime_type: mime, data: im.data } });
       }
-      const payload = {
-        contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.2, ...(body?.json !== false ? { response_mime_type: "application/json" } : {}) }
-      };
-      const r = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-        body: JSON.stringify(payload)
-      });
-      const d = await r.json().catch(() => ({}));
+      // Razonamiento: los modelos Gemini piensan al máximo si no se indica nada (lento).
+      // Gemini 3 usa thinkingLevel; Gemini 2.5 usa thinkingBudget. Se prueba en ese orden y,
+      // si el modelo rechaza la opción, se reintenta sin ella.
+      const level = ["minimal", "low", "medium", "high"].includes(body?.thinking) ? body.thinking : "minimal";
+      const thinkingOptions = [
+        { thinkingLevel: level },
+        { thinkingBudget: level === "minimal" ? 0 : level === "low" ? 1024 : -1 },
+        null
+      ];
+      const t0 = Date.now();
+      let r, d;
+      for (const tc of thinkingOptions) {
+        const payload = {
+          contents: [{ role: "user", parts }],
+          generationConfig: {
+            temperature: 0.2,
+            ...(body?.json !== false ? { responseMimeType: "application/json" } : {}),
+            ...(tc ? { thinkingConfig: tc } : {})
+          }
+        };
+        r = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          body: JSON.stringify(payload)
+        });
+        d = await r.json().catch(() => ({}));
+        const msg = String(d?.error?.message || "");
+        if (r.status === 400 && tc && /thinking/i.test(msg)) continue; // opción no soportada por este modelo
+        break;
+      }
       if (!r.ok) {
         const code = r.status === 429 ? "rate_limited" : "upstream";
         return json({ error: code, message: d?.error?.message?.slice(0, 300) || "HTTP " + r.status }, r.status === 429 ? 429 : 502);
@@ -77,7 +97,7 @@ export default {
       const cand = d?.candidates?.[0];
       const text = (cand?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("");
       if (!text) return json({ error: "blocked", message: d?.promptFeedback?.blockReason || cand?.finishReason || "Respuesta vacía" }, 502);
-      return json({ text, model });
+      return json({ text, model, ms: Date.now() - t0 });
     }
 
     return json({ error: "not_found" }, 404);
