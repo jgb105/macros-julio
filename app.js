@@ -354,10 +354,11 @@ function viewDraft(){
 function photoPicker(max, labels){
   const A = S.add;
   return `${A.urls.length ? `<div class="thumbs">${A.urls.map((u, i) => `<div class="thumb"><img src="${u}" alt="${labels[i] || "Foto"}"><span>${labels[i] || "Foto"}</span><button data-a="rmphoto" data-ix="${i}" aria-label="Quitar foto">×</button></div>`).join("")}</div>` : ""}
-  ${A.urls.length < max ? `<label class="drop"><input type="file" id="pick" accept="image/*" ${A.urls.length === 0 ? 'capture="environment"' : ""}>
+  ${A.urls.length < max ? `<div class="drop">
     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
     <b>${A.urls.length === 0 ? (A.mode === "foto" ? "Toma o elige una foto de tu plato" : "Fotografía la tabla nutricional") : labels[A.urls.length] ? "Agregar: " + labels[A.urls.length] + " (opcional)" : "Agregar otra foto"}</b>
-    <span class="muted small">${A.urls.length === 0 ? (A.mode === "foto" ? "Desde arriba, con todo el plato a la vista y buena luz." : "Que se lean bien los números, sin reflejos.") : "Saca una segunda foto con lo que sobró (huesos, cáscaras) y la IA lo resta."}</span></label>` : ""}`;
+    <span class="muted small">${A.urls.length === 0 ? (A.mode === "foto" ? "Desde arriba, con todo el plato a la vista y buena luz." : "Que se lean bien los números, sin reflejos.") : "Saca una segunda foto con lo que sobró (huesos, cáscaras) y la IA lo resta."}</span>
+    <div class="row wrapr" style="justify-content:center"><label class="btn sm filebtn">Tomar foto<input type="file" id="pick" accept="image/*" capture="environment"></label><label class="btn ghost sm filebtn">Elegir de la galería<input type="file" id="pickgal" accept="image/*"></label></div></div>` : ""}`;
 }
 function viewAdd(){
   const A = S.add;
@@ -963,7 +964,7 @@ function renderKeepFocus(id, pos){
 }
 document.addEventListener("change", ev => {
   const el = ev.target;
-  if (el.id === "pick") { const f = el.files?.[0]; if (!f) return; const A = S.add; A.files.push(f); A.urls.push(URL.createObjectURL(f)); A.err = ""; render(); }
+  if (el.id === "pick" || el.id === "pickgal") { const f = el.files?.[0]; if (!f) return; const A = S.add; A.files.push(f); A.urls.push(URL.createObjectURL(f)); A.err = ""; render(); }
   else if (el.id === "bfpick") { const f = el.files?.[0]; if (!f) return; S.prog.files.push(f); S.prog.urls.push(URL.createObjectURL(f)); render(); }
   else if (el.id === "importf") { const f = el.files?.[0]; if (!f) return; f.text().then(t => { const d = JSON.parse(t); if (!d || typeof d !== "object" || !("days" in d)) throw 0;
       localStorage.setItem(KEY, JSON.stringify(d)); DB = load(); S.view = DB.profile || DB.goals ? "hoy" : "onb"; toast("Respaldo importado"); render(); }).catch(() => toast("Ese archivo no es un respaldo válido.")); }
