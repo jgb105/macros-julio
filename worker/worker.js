@@ -70,39 +70,83 @@ export default {
         null
       ];
       const t0 = Date.now();
-      let r, d;
-      for (const tc of thinkingOptions) {
-        const payload = {
-          contents: [{ role: "user", parts }],
-          generationConfig: {
-            temperature: 0.2,
-            ...(body?.json !== false ? { responseMimeType: "application/json" } : {}),
-            ...(tc ? { thinkingConfig: tc } : {})
-          }
-        };
-        r = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-          body: JSON.stringify(payload)
-        });
-        d = await r.json().catch(() => ({}));
-        const msg = String(d?.error?.message || "");
-        if (r.status === 400 && tc && /thinking/i.test(msg)) continue; // opción no soportada por este modelo
-        break;
+      const callModel = async (m) => {
+        let r, d;
+        for (const tc of thinkingOptions) {
+          const payload = {
+            contents: [{ role: "user", parts }],
+            generationConfig: {
+              temperature: 0.2,
+              ...(body?.json !== false ? { responseMimeType: "application/json" } : {}),
+              ...(tc ? { thinkingConfig: tc } : {})
+            }
+          };
+          r = await fetch(`${API}/models/${encodeURIComponent(m)}:generateContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+            body: JSON.stringify(payload)
+          });
+          d = await r.json().catch(() => ({}));
+          const msg = String(d?.error?.message || "");
+          if (r.status === 400 && tc && /thinking/i.test(msg)) continue; // opción no soportada por este modelo
+          break;
+        }
+        return { r, d };
+      };
+      // Saturación (503), cuota del modelo (429) o error interno (500): reintentar una vez
+      // y luego pasar a otros modelos. Cada modelo tiene su propia cuota gratis.
+      const busy = s => s === 503 || s === 429 || s === 500 || s === 504;
+      const chain = [model, model, ...(await fallbackModels(env, model))];
+      let res, used = model, tries = 0;
+      for (const m of chain) {
+        if (tries === 1 && m === model) await new Promise(ok => setTimeout(ok, 1500));
+        tries++;
+        res = await callModel(m);
+        used = m;
+        if (res.r.ok || !busy(res.r.status)) break;
       }
+      const { r, d } = res;
       if (!r.ok) {
-        const code = r.status === 429 ? "rate_limited" : "upstream";
-        return json({ error: code, message: d?.error?.message?.slice(0, 300) || "HTTP " + r.status }, r.status === 429 ? 429 : 502);
+        if (busy(r.status)) {
+          const quota = r.status === 429;
+          return json({ error: quota ? "rate_limited" : "upstream", message: quota
+            ? "Se acabó la cuota gratis de Gemini por ahora en todos los modelos. Prueba más tarde o anota los datos a mano."
+            : "Gemini está saturado en este momento (también los modelos de respaldo). Intenta de nuevo en un minuto." }, quota ? 429 : 502);
+        }
+        return json({ error: "upstream", message: d?.error?.message?.slice(0, 300) || "HTTP " + r.status }, 502);
       }
       const cand = d?.candidates?.[0];
       const text = (cand?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("");
       if (!text) return json({ error: "blocked", message: d?.promptFeedback?.blockReason || cand?.finishReason || "Respuesta vacía" }, 502);
-      return json({ text, model, ms: Date.now() - t0 });
+      return json({ text, model: used, fallback: used !== model, ms: Date.now() - t0 });
     }
 
     return json({ error: "not_found" }, 404);
   }
 };
+
+// Modelos de respaldo cuando el principal está saturado. Se pueden fijar con la variable
+// GEMINI_FALLBACKS (separados por coma); si no, se eligen entre los modelos Flash que tu key tiene.
+let modelCache = null, modelCacheAt = 0;
+async function fallbackModels(env, primary) {
+  const preferred = (env.GEMINI_FALLBACKS || "gemini-flash-lite-latest,gemini-2.5-flash,gemini-2.5-flash-lite")
+    .split(",").map(s => s.trim()).filter(Boolean);
+  try {
+    if (!modelCache || Date.now() - modelCacheAt > 3600e3) {
+      const r = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": env.GEMINI_API_KEY } });
+      const d = await r.json();
+      modelCache = (d.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map(m => String(m.name || "").replace(/^models\//, ""));
+      modelCacheAt = Date.now();
+    }
+    const avail = new Set(modelCache);
+    const extra = modelCache.filter(n => /^gemini-[\d.]+-flash(-lite)?$/.test(n)).sort().reverse();
+    return [...new Set([...preferred.filter(n => avail.has(n)), ...extra])].filter(n => n !== primary).slice(0, 3);
+  } catch {
+    return preferred.filter(n => n !== primary).slice(0, 2);
+  }
+}
 
 function safeEqual(a, b) {
   if (a.length !== b.length) return false;
