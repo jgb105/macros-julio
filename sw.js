@@ -1,5 +1,5 @@
 /* Service worker: la app abre sin internet. Las llamadas al Worker de Gemini nunca se guardan en caché. */
-const CACHE = "macros-julio-v1";
+const CACHE = "macros-julio-v2";
 const SHELL = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -13,7 +13,7 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   if (url.origin === self.location.origin) {
     // Primero la red (para recibir actualizaciones); si no hay conexión, la copia guardada.
-    e.respondWith(fetch(req).then(r => { if (r.ok) { const cp = r.clone(); caches.open(CACHE).then(c => c.put(req, cp)); } return r; })
+    e.respondWith(fetch(req, {cache: "no-cache"}).then(r => { if (r.ok) { const cp = r.clone(); caches.open(CACHE).then(c => c.put(req, cp)); } return r; })
       .catch(() => caches.match(req).then(r => r || caches.match("index.html"))));
   } else if (url.hostname.endsWith("fonts.googleapis.com") || url.hostname.endsWith("fonts.gstatic.com")) {
     e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => { const cp = res.clone(); caches.open(CACHE).then(c => c.put(req, cp)); return res; })));

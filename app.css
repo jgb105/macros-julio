@@ -12,7 +12,7 @@
   --accent:#5DBE83; --accent-ink:#06120B; --accent-soft:#1D3527;
   --prot:#F08A5D; --carb:#E2B544; --fat:#72A9EA; --fib:#B5C96A; --warn:#F07167; --warn-soft:#3A1E1C; --water:#5BB5E6; color-scheme:dark}}
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;touch-action:manipulation;overscroll-behavior:none}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font-family:var(--f-body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
@@ -31,6 +31,9 @@ p{margin:0}
 .xs{font-size:12px}
 .num{font-variant-numeric:tabular-nums}
 button,input,select,textarea{font:inherit;color:inherit}
+/* 16px evita que el iPhone haga zoom al tocar un campo */
+input,select,textarea{font-size:16px}
+*{-webkit-tap-highlight-color:transparent}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .card{background:var(--surface);border-radius:var(--r);padding:16px;border:1px solid var(--line);display:flex;flex-direction:column;gap:10px;min-width:0}

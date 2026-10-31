@@ -136,7 +136,7 @@ function parseJSONLoose(t){
   if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch(e){} }
   throw {code:"parse"};
 }
-async function fileToPart(file, max = 1280){
+async function fileToPart(file, max = 1024){
   let img, url;
   try { img = await createImageBitmap(file); }
   catch(e){ url = URL.createObjectURL(file); img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; }); }
@@ -144,24 +144,27 @@ async function fileToPart(file, max = 1280){
   const c = document.createElement("canvas"); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
   if (url) URL.revokeObjectURL(url);
-  return {mime:"image/jpeg", data:c.toDataURL("image/jpeg", 0.82).split(",")[1]};
+  return {mime:"image/jpeg", data:c.toDataURL("image/jpeg", 0.8).split(",")[1]};
 }
 let ctl = null;
-async function ai(prompt, files = []){
+async function ai(prompt, files = [], thinking = "minimal"){
   const s = DB.settings;
   if (!s.workerUrl || !s.token) throw {code:"config"};
   const images = [];
   for (const f of files) images.push(await fileToPart(f));
   ctl = new AbortController();
-  let r;
+  const tStart = Date.now(); const tick = setInterval(() => document.querySelectorAll("[data-elapsed]").forEach(e => e.textContent = Math.floor((Date.now() - tStart) / 1000)), 1000);
   try {
-    r = await fetch(s.workerUrl.replace(/\/+$/, "") + "/ai", {method:"POST", signal:ctl.signal,
-      headers:{"Content-Type":"application/json", "X-App-Token":s.token},
-      body:JSON.stringify({prompt, images, json:true, model:s.model || undefined})});
-  } catch(e){ throw {code: e?.name === "AbortError" ? "cancelled" : "network"}; }
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw {code:d.error || "http", message:d.message || ""};
-  return parseJSONLoose(d.text);
+    let r;
+    try {
+      r = await fetch(s.workerUrl.replace(/\/+$/, "") + "/ai", {method:"POST", signal:ctl.signal,
+        headers:{"Content-Type":"application/json", "X-App-Token":s.token},
+        body:JSON.stringify({prompt, images, json:true, thinking, model:s.model || undefined})});
+    } catch(e){ throw {code: e?.name === "AbortError" ? "cancelled" : "network"}; }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw {code:d.error || "http", message:d.message || ""};
+    return parseJSONLoose(d.text);
+  } finally { clearInterval(tick); }
 }
 function aiErr(e){
   switch (e?.code){
@@ -364,7 +367,7 @@ function viewAdd(){
   const A = S.add;
   const modes = [["foto","Plato"],["etiqueta","Etiqueta"],["texto","Escribir"],["buscar","Guardados"],["manual","Manual"]];
   let body = "";
-  if (A.busy) body = `<section class="card thinking"><span class="spin" aria-hidden="true"></span><div class="grow"><b>${A.busy === "etiqueta" ? "Leyendo la tabla…" : "Calculando calorías y macros…"}</b><div class="muted small">Suele tardar entre 5 y 30 segundos.</div></div><button class="btn ghost sm" data-a="stop">Cancelar</button></section>`;
+  if (A.busy) body = `<section class="card thinking"><span class="spin" aria-hidden="true"></span><div class="grow"><b>${A.busy === "etiqueta" ? "Leyendo la tabla…" : "Calculando calorías y macros…"}</b><div class="muted small num"><span data-elapsed>0</span> s · suele tardar menos de 15 s</div></div><button class="btn ghost sm" data-a="stop">Cancelar</button></section>`;
   else if (A.draft) body = viewDraft();
   else if (A.mode === "foto") body = `${photoPicker(2, ["Plato", "Lo que sobró"])}
     <div class="g2"><label class="f" data-keep>Peso total en gramos (opcional)<input class="in" id="ptotal" inputmode="decimal" placeholder="Sin el plato" value="${esc(A.total)}"></label><div></div></div>
@@ -515,7 +518,7 @@ function viewProg(){
     <p class="banner err xs">Ojo: en el plan gratis de Gemini, Google puede usar lo que envías para mejorar sus productos. Si prefieres no enviar fotos de tu cuerpo, usa la estimación con medidas.</p>
     ${PR.urls.length ? `<div class="thumbs">${PR.urls.map((u, i) => `<div class="thumb"><img src="${u}" alt="Foto ${i + 1}"><span>${["Frente", "Lado izq.", "Lado der."][i]}</span><button data-a="rmbf" data-ix="${i}" aria-label="Quitar foto">×</button></div>`).join("")}</div>` : ""}
     ${PR.urls.length < 3 ? `<label class="btn ghost filebtn">Agregar foto ${PR.urls.length + 1} de 3<input type="file" id="bfpick" accept="image/*"></label>` : ""}
-    ${PR.busy ? `<div class="thinking"><span class="spin"></span><span>Analizando tus fotos…</span></div>` : `<button class="btn" data-a="bfrun" ${PR.urls.length ? "" : "disabled"}>Estimar mi % de grasa</button>`}
+    ${PR.busy ? `<div class="thinking"><span class="spin"></span><span>Analizando tus fotos… <span class="num" data-elapsed>0</span> s</span></div>` : `<button class="btn" data-a="bfrun" ${PR.urls.length ? "" : "disabled"}>Estimar mi % de grasa</button>`}
     ${PR.err ? `<div class="banner err">${esc(PR.err)}</div>` : ""}
     ${PR.bf ? `<div class="label" style="border-width:1px"><div class="tot" style="border-top:0;margin:0;padding:0"><b>% de grasa estimado</b><span class="k num">${r1(PR.bf.v)} %</span></div><p class="muted xs">Rango ${PR.bf.r[0]}–${PR.bf.r[1]} %. ${esc(PR.bf.note)}</p><button class="btn sm" data-a="bfsave">Guardar junto a mi peso de hoy</button></div>` : ""}
   </section>
@@ -536,7 +539,7 @@ function mealKey(m){ const k = (MEALS.find(x => x[0] === m || x[1].toLowerCase()
 function viewPlan(){
   const PL = S.plan, rem = remainingToday(), pend = pendingMeals();
   let body = "";
-  if (PL.busy) body = `<section class="card thinking"><span class="spin"></span><div class="grow"><b>${PL.busy === "plan" ? "Armando tu menú…" : PL.busy === "swap" ? "Calculando otra opción…" : "Calculando lo que te falta…"}</b><div class="muted small">Suele tardar entre 10 y 40 segundos.</div></div><button class="btn ghost sm" data-a="stop">Cancelar</button></section>`;
+  if (PL.busy) body = `<section class="card thinking"><span class="spin"></span><div class="grow"><b>${PL.busy === "plan" ? "Armando tu menú…" : PL.busy === "swap" ? "Calculando otra opción…" : "Calculando lo que te falta…"}</b><div class="muted small num"><span data-elapsed>0</span> s · suele tardar menos de 30 s</div></div><button class="btn ghost sm" data-a="stop">Cancelar</button></section>`;
   else if (PL.res) {
     const all = PL.res.meals, tot = all.reduce((a, m) => ({kcal:a.kcal + m.kcal, p:a.p + m.p, c:a.c + m.c, f:a.f + m.f}), {kcal:0, p:0, c:0, f:0});
     body = `${all.map((m, i) => `<section class="card"><div class="row between"><span class="eyebrow">${esc((MEALS.find(x => x[0] === mealKey(m.momento)) || [0, m.momento])[1])}</span><span class="num muted small">${rnd(m.kcal)} kcal</span></div><h3>${esc(m.nombre)}</h3>
@@ -580,18 +583,18 @@ async function runPlan(kind, ix){
   try {
     if (kind === "swap") {
       PL.busy = "swap"; render();
-      const m = PL.res.meals[ix], res = await ai(P.swap(m, freq)), nm = mealsFromAI([res?.comida || res])[0];
+      const m = PL.res.meals[ix], res = await ai(P.swap(m, freq), [], "low"), nm = mealsFromAI([res?.comida || res])[0];
       if (!nm) throw {code:"parse"};
       PL.res.meals[ix] = nm; toast("Listo, cambié tu " + ((MEALS.find(x => x[0] === mealKey(nm.momento)) || [0, "comida"])[1]).toLowerCase());
     } else if (kind === "complete") {
       PL.busy = "complete"; render();
       const pend = pendingMeals();
-      const res = await ai(P.complete(remainingToday(), pend.length ? pend : ["colación"], freq)), meals = mealsFromAI(res?.comidas);
+      const res = await ai(P.complete(remainingToday(), pend.length ? pend : ["colación"], freq), [], "low"), meals = mealsFromAI(res?.comidas);
       if (!meals.length) throw {code:"parse"};
       PL.res = {kind:"completar", meals, note:String(res?.nota || "")};
     } else {
       PL.busy = "plan"; render();
-      const res = await ai(P.plan(targetFor(today()), freq)), meals = mealsFromAI(res?.comidas);
+      const res = await ai(P.plan(targetFor(today()), freq), [], "low"), meals = mealsFromAI(res?.comidas);
       if (!meals.length) throw {code:"parse"};
       PL.res = {kind:"plan", meals, note:String(res?.nota || "")};
     }
@@ -926,7 +929,7 @@ async function runBF(){
   PR.busy = true; PR.err = ""; PR.bf = null; render();
   const m = [...DB.measures].sort((a, b) => a.date < b.date ? 1 : -1)[0];
   const ms = m ? MEASURES.filter(([k]) => num(m[k])).map(([k, l]) => `${l.toLowerCase()} ${m[k]} cm`).join(", ") : "";
-  try { const r = await ai(P.bodyfat(DB.profile, ms), PR.files); const v = num(r?.grasa_pct); if (!v) throw {code:"parse"};
+  try { const r = await ai(P.bodyfat(DB.profile, ms), PR.files, "low"); const v = num(r?.grasa_pct); if (!v) throw {code:"parse"};
     const rg = Array.isArray(r?.rango) ? r.rango.map(num) : [v - 2, v + 2]; PR.bf = {v, r:[rnd(rg[0] || v - 2), rnd(rg[1] || v + 2)], note:String(r?.nota || "").slice(0, 200)}; }
   catch(e){ if (e?.code !== "cancelled") PR.err = aiErr(e); }
   finally { PR.busy = false; ctl = null; render(); }
@@ -975,6 +978,11 @@ document.addEventListener("keydown", ev => { if (ev.key === "Escape" && S.sheet)
 window.addEventListener("pagehide", () => { if (S.view === "ajustes") readSettings(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.view === "hoy") render(); });
 setInterval(() => { if (S.view === "hoy" && !document.hidden && !S.sheet) render(); }, 60000);
+
+/* =================== sin zoom (gesto de pellizcar / doble toque) =================== */
+["gesturestart","gesturechange","gestureend"].forEach(t => document.addEventListener(t, e => e.preventDefault(), {passive:false}));
+document.addEventListener("touchmove", e => { if (e.touches.length > 1) e.preventDefault(); }, {passive:false});
+document.addEventListener("wheel", e => { if (e.ctrlKey) e.preventDefault(); }, {passive:false});
 
 /* =================== arranque =================== */
 render();
